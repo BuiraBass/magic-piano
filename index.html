@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сиқырлы Пианино: Қошақаным</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Nunito', sans-serif;
+            user-select: none;
+            overflow: hidden;
+            background-color: #e0f2fe; /* Light sky blue */
+            touch-action: none; /* Запрещаем скролл и зум на мобильных */
+        }
+
+        /* Анимации */
+        .bounce-slow { animation: bounce 3s infinite; }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(-5%); }
+            50% { transform: translateY(0); }
+        }
+        
+        .pulse-glow { animation: pulseGlow 2s infinite; }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 15px #fde047; }
+            50% { box-shadow: 0 0 30px #facc15; }
+        }
+
+        /* Пианино стилі */
+        .piano-wrapper {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 1000px;
+            height: 35vh;
+            height: 35dvh; /* Поддержка высоты мобильных браузеров */
+            min-height: 200px; /* Минимальная высота для маленьких экранов */
+            display: flex;
+            justify-content: center;
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            background: #cbd5e1;
+            padding: 10px 10px 0 10px;
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.1);
+            touch-action: none; /* Блокируем системные жесты в зоне пианино */
+        }
+
+        .piano-key {
+            position: relative;
+            cursor: pointer;
+            transition: all 0.1s ease;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 20px;
+            font-weight: bold;
+            color: #94a3b8;
+            font-size: clamp(0.7rem, 2.5vw, 1.5rem); /* Текст сам уменьшается на узких экранах */
+        }
+
+        .white-key {
+            background-color: white;
+            border: 2px solid #e2e8f0;
+            width: 14.28%; /* 7 white keys */
+            height: 100%;
+            z-index: 1;
+            box-shadow: 0 8px 0 #cbd5e1;
+        }
+
+        .white-key.active {
+            background-color: #f1f5f9;
+            transform: translateY(4px);
+            box-shadow: 0 4px 0 #cbd5e1;
+        }
+
+        .black-key {
+            background-color: #1e293b;
+            width: 8%;
+            height: 60%;
+            position: absolute;
+            z-index: 10;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+            box-shadow: 0 6px 0 #0f172a;
+            color: transparent;
+        }
+
+        .black-key.active {
+            background-color: #334155;
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #0f172a;
+        }
+
+        /* Активная нота, которую нужно нажать */
+        .expected-note.white-key {
+            background-color: #fef08a;
+            border-color: #facc15;
+            color: #854d0e;
+        }
+        .expected-note.black-key {
+            background-color: #713f12;
+        }
+
+        #output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .screen.active {
+            display: flex;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. Басты бет (Главная страница) -->
+    <div id="screen-home" class="screen active bg-sky-200">
+        <div class="text-center bounce-slow">
+            <h1 class="text-6xl md:text-8xl font-black text-pink-500 mb-4 drop-shadow-lg">
+                Сиқырлы<br>Пианино
+            </h1>
+            <p class="text-2xl md:text-4xl text-sky-800 font-bold mb-12">«Қошақаным» әнін үйренейік! 🐑🎹</p>
+            <button onclick="startGameSequence()" class="pulse-glow bg-yellow-400 hover:bg-yellow-300 text-yellow-900 text-3xl font-bold py-4 px-12 rounded-full shadow-xl transform transition hover:scale-110 active:scale-95">
+                Бастау ✨
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. Ережелер беті (Страница правил) -->
+    <div id="screen-rules" class="screen bg-pink-100">
+        <div class="bg-white rounded-3xl p-8 md:p-12 shadow-2xl max-w-2xl w-11/12 text-center">
+            <h2 class="text-4xl md:text-5xl font-black text-sky-500 mb-8">Ойын ережесі</h2>
+            
+            <div class="flex flex-col gap-6 text-xl md:text-2xl text-gray-700 font-bold mb-10 text-left">
+                <div class="flex items-center gap-4">
+                    <div class="text-4xl">📸</div>
+                    <p>Камераны қосуға рұқсат беріңіз.</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="text-4xl">🖐️</div>
+                    <p>Қолыңызды камераға көрсетіңіз. Экранда сиқырлы қаңқа пайда болады.</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="text-4xl">🤏</div>
+                    <p>Сары түспен жанған пернелерді басу үшін <b>бас бармақ пен сұқ саусағыңызды біріктіріңіз (шімшіңіз)</b> немесе тышқанмен шертіңіз.</p>
+                </div>
+            </div>
+
+            <button onclick="enterGame()" class="bg-sky-400 hover:bg-sky-300 text-white text-3xl font-bold py-4 px-12 rounded-full shadow-xl transform transition hover:scale-110 active:scale-95">
+                Түсіндім, Ойнау! 🚀
+            </button>
+        </div>
+    </div>
+
+    <!-- 3. Ойын беті (Игровой экран) -->
+    <div id="screen-game" class="screen bg-sky-50 relative">
+        <!-- Индикатор загрузки камеры -->
+        <div id="loading-indicator" class="absolute inset-0 flex flex-col items-center justify-center bg-sky-50 z-40">
+            <div class="w-16 h-16 border-8 border-sky-300 border-t-pink-500 rounded-full animate-spin mb-4"></div>
+            <h2 class="text-3xl font-bold text-sky-800">Камера қосылуда...</h2>
+        </div>
+
+        <!-- Прогресс песни -->
+        <div class="absolute top-8 left-1/2 transform -translate-x-1/2 w-11/12 max-w-2xl z-20">
+            <div class="bg-white rounded-full h-8 shadow-inner overflow-hidden border-4 border-white">
+                <div id="progress-bar" class="bg-gradient-to-r from-pink-400 to-yellow-400 h-full w-0 transition-all duration-300"></div>
+            </div>
+            <p id="note-display" class="text-center text-3xl font-black text-sky-800 mt-4 drop-shadow-md">Нота күтілуде...</p>
+        </div>
+
+        <!-- Видео и Canvas для трекинга -->
+        <video id="input_video" class="hidden" playsinline muted autoplay></video>
+        <canvas id="output_canvas"></canvas>
+
+        <!-- Пианино -->
+        <div class="piano-wrapper" id="piano-container">
+            <!-- Пернелер JavaScript арқылы жасалады (Кнопки генерируются в JS) -->
+        </div>
+    </div>
+
+    <!-- 4. Жеңіс беті (Экран победы) -->
+    <div id="screen-victory" class="screen bg-yellow-100">
+        <div class="text-center bounce-slow">
+            <h1 class="text-6xl md:text-8xl font-black text-pink-500 mb-4 drop-shadow-lg">
+                Жарайсың! 🎉
+            </h1>
+            <p class="text-2xl md:text-4xl text-sky-800 font-bold mb-12">Сіз әнді толық ойнап шықтыңыз!</p>
+            <button onclick="resetGame()" class="bg-sky-400 hover:bg-sky-300 text-white text-3xl font-bold py-4 px-12 rounded-full shadow-xl transform transition hover:scale-110 active:scale-95">
+                Қайта ойнау 🔄
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Аудио Синтезатор (Web Audio API) ---
+        let audioCtx;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(frequency) {
+            if (!audioCtx) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.type = 'sine'; // Мягкий звук для детей
+            oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.start();
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+            oscillator.stop(audioCtx.currentTime + 1.5);
+        }
+
+        // --- Ноталар мен Пианино (Ноты и Пианино) ---
+        const PITCHES = {
+            'C4': 261.63, 'C#4': 277.18, 'D4': 293.66, 'D#4': 311.13, 
+            'E4': 329.63, 'F4': 349.23, 'F#4': 369.99, 'G4': 392.00, 
+            'G#4': 415.30, 'A4': 440.00, 'A#4': 466.16, 'B4': 493.88
+        };
+
+        const PIANO_LAYOUT = [
+            { note: 'C4', type: 'white' },
+            { note: 'C#4', type: 'black', left: '10.28%' },
+            { note: 'D4', type: 'white' },
+            { note: 'D#4', type: 'black', left: '24.56%' },
+            { note: 'E4', type: 'white' },
+            { note: 'F4', type: 'white' },
+            { note: 'F#4', type: 'black', left: '53.12%' },
+            { note: 'G4', type: 'white' },
+            { note: 'G#4', type: 'black', left: '67.40%' },
+            { note: 'A4', type: 'white' },
+            { note: 'A#4', type: 'black', left: '81.68%' },
+            { note: 'B4', type: 'white' }
+        ];
+
+        const SONG_NOTES = [
+            // Куплет
+            'C#4', 'C#4', 'C#4', 'E4', 'G#4', 'E4', 'F#4',
+            'G#4', 'A4', 'G#4', 'F#4', 'E4', 'D#4', 'C#4',
+            'C#4', 'C#4', 'C#4', 'E4', 'G#4', 'E4', 'F#4',
+            'G#4', 'A4', 'G#4', 'F#4', 'G#4', 'A4', 'B4',
+            // Қайырмасы (Припев)
+            'G#4', 'B4', 'B4', 'B4', 'A4', 'G#4', 'A4',
+            'F#4', 'A4', 'A4', 'A4', 'G#4', 'F#4', 'G#4',
+            'E4', 'G#4', 'G#4', 'G#4', 'F#4', 'E4', 'D#4', 'A4',
+            'G#4', 'A4', 'G#4', 'F#4', 'E4', 'D#4', 'C#4'
+        ];
+
+        let currentSongIndex = 0;
+        let lastHandPressedNote = null;
+        let handCooldown = 0;
+        let cameraStarted = false;
+
+        // --- UI Функциялары ---
+        function switchScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        function startGameSequence() {
+            initAudio(); // Initialize audio on first user gesture
+            switchScreen('screen-rules');
+        }
+
+        function enterGame() {
+            switchScreen('screen-game');
+            if (!cameraStarted) {
+                startCamera();
+                cameraStarted = true;
+            }
+            buildPiano();
+            updateGameUI();
+        }
+
+        function resetGame() {
+            currentSongIndex = 0;
+            switchScreen('screen-game');
+            updateGameUI();
+        }
+
+        // --- Пианиноны құру (Создание пианино) ---
+        function buildPiano() {
+            const container = document.getElementById('piano-container');
+            container.innerHTML = '';
+            
+            PIANO_LAYOUT.forEach(keyData => {
+                const keyEl = document.createElement('div');
+                keyEl.classList.add('piano-key', keyData.type + '-key');
+                keyEl.dataset.note = keyData.note;
+                
+                if (keyData.type === 'black') {
+                    keyEl.style.left = keyData.left;
+                } else {
+                    keyEl.innerText = keyData.note.replace('4', ''); // Show note name without octave
+                }
+
+                // Mouse events
+                keyEl.addEventListener('mousedown', () => handleNotePress(keyData.note));
+                keyEl.addEventListener('mouseup', () => removeActiveStyle(keyData.note));
+                keyEl.addEventListener('mouseleave', () => removeActiveStyle(keyData.note));
+
+                // Touch events for mobile/tablet fallback
+                keyEl.addEventListener('touchstart', (e) => { e.preventDefault(); handleNotePress(keyData.note); });
+                keyEl.addEventListener('touchend', (e) => { e.preventDefault(); removeActiveStyle(keyData.note); });
+
+                container.appendChild(keyEl);
+            });
+        }
+
+        function handleNotePress(note) {
+            playSound(PITCHES[note]);
+            
+            // Visual feedback
+            const keyEl = document.querySelector(`.piano-key[data-note="${note}"]`);
+            if (keyEl) keyEl.classList.add('active');
+
+            // Game Logic
+            if (currentSongIndex < SONG_NOTES.length && note === SONG_NOTES[currentSongIndex]) {
+                currentSongIndex++;
+                updateGameUI();
+                
+                if (currentSongIndex >= SONG_NOTES.length) {
+                    setTimeout(() => switchScreen('screen-victory'), 1000);
+                }
+            }
+        }
+
+        function removeActiveStyle(note) {
+            const keyEl = document.querySelector(`.piano-key[data-note="${note}"]`);
+            if (keyEl) keyEl.classList.remove('active');
+        }
+
+        function updateGameUI() {
+            if (currentSongIndex >= SONG_NOTES.length) return;
+
+            // Update Progress
+            const progressPercent = (currentSongIndex / SONG_NOTES.length) * 100;
+            document.getElementById('progress-bar').style.width = `${progressPercent}%`;
+
+            // Update expected note text
+            const nextNote = SONG_NOTES[currentSongIndex];
+            document.getElementById('note-display').innerText = `Келесі нота: ${nextNote.replace('4', '')}`;
+
+            // Highlight expected key
+            document.querySelectorAll('.piano-key').forEach(el => el.classList.remove('expected-note'));
+            const expectedKeyEl = document.querySelector(`.piano-key[data-note="${nextNote}"]`);
+            if (expectedKeyEl) expectedKeyEl.classList.add('expected-note');
+        }
+
+        // --- Трекинг рук (MediaPipe) ---
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function onResults(results) {
+            // Hide loading indicator on first frame
+            const loading = document.getElementById('loading-indicator');
+            if (loading && !loading.classList.contains('hidden')) {
+                loading.classList.add('hidden');
+            }
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Mirror canvas horizontally to match mirrored user movements
+            canvasCtx.scale(-1, 1);
+            canvasCtx.translate(-canvasElement.width, 0);
+
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    // Draw transparent skeleton (прозрачный скелет)
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+                        color: 'rgba(255, 255, 255, 0.6)', 
+                        lineWidth: 6
+                    });
+                    drawLandmarks(canvasCtx, landmarks, {
+                        color: 'rgba(125, 211, 252, 0.8)', // Tailwind sky-300
+                        lineWidth: 2,
+                        radius: 6
+                    });
+
+                    // Collision Detection with Pinch (Thumb and Index Finger)
+                    const thumbTip = landmarks[4];
+                    const indexFinger = landmarks[8];
+                    
+                    // Calculate distance between thumb and index finger for pinch detection
+                    const dx = thumbTip.x - indexFinger.x;
+                    const dy = thumbTip.y - indexFinger.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const isPinching = distance < 0.05; // Pinch threshold
+                    
+                    if (isPinching) {
+                        // Convert normalized coordinates to screen coordinates
+                        // Since canvas is mirrored, we invert X for collision mapping
+                        const screenX = (1 - indexFinger.x) * window.innerWidth;
+                        const screenY = indexFinger.y * window.innerHeight;
+
+                        // Find element under finger
+                        const elements = document.elementsFromPoint(screenX, screenY);
+                        const keyEl = elements.find(el => el.classList && el.classList.contains('piano-key'));
+
+                        if (keyEl) {
+                            const note = keyEl.dataset.note;
+                            const now = Date.now();
+                            
+                            // Prevent spamming the same note
+                            if (note !== lastHandPressedNote || (now - handCooldown > 500)) {
+                                handleNotePress(note);
+                                lastHandPressedNote = note;
+                                handCooldown = now;
+                                
+                                // Visual active state reset
+                                setTimeout(() => removeActiveStyle(note), 300);
+                            }
+                        }
+                    } else {
+                        // Reset if fingers are not pinching
+                        lastHandPressedNote = null;
+                    }
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+        hands.onResults(onResults);
+
+        function startCamera() {
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280,
+                height: 720,
+                facingMode: 'user'
+            });
+            camera.start();
+        }
+    </script>
+</body>
+</html>
